@@ -45,7 +45,7 @@ enum Direction {
 /* -----------------------------
  * ------ PID CONSTANTS -------- 
  * ----------------------------- */
-const float kP = 0.1;
+const float kP = 10.0;
 float setpoint;
 float command;
 
@@ -55,7 +55,7 @@ float command;
 void calibrateIMU();
 void updateAngle();
 float readIMU_Y();
-void moveMotors();
+void moveMotors(Direction direction, int speed);
 void updateMotorsPID();
 
 void setup() {
@@ -65,9 +65,6 @@ void setup() {
   pinMode(MOTOR_PWM, OUTPUT);
   pinMode(MOTOR_IN_A, OUTPUT);
   pinMode(MOTOR_IN_B, OUTPUT);
-  pinMode(MOTOR_ENCODER_A, INPUT);
-  pinMode(MOTOR_ENCODER_B, INPUT);
-  
   
   // IMU initialization
   Wire.begin(); // IMU connection
@@ -92,7 +89,8 @@ void loop() {
 void updateMotorsPID() {
   command = kP * (currAngle - setpoint);
   Direction direction = (command >= 0) ? FORWARD : BACKWARD;
-  int speed = max(abs(command), 255);
+  int speed = min(abs(command), 255);
+  Serial.println(command);
   moveMotors(direction, speed);
 }
 
