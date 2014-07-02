@@ -8,7 +8,7 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6];
-float zeroIMUValues[4] = {0, 0, 0, 0};
+int zeroIMUAngle = 90;
 
 const float GYRO_SCALE = 0.001009091;
 const float ACC_SCALE = 0.1;
@@ -35,14 +35,12 @@ void setup() {
   delay(5);
   IMU.init();
   delay(5);
-
-  calibrateIMU();
 }
 
 void loop() {
   updateIMU();
 
-  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000));
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
   Serial.println(pitch);
   lastTime = micros();
 }
@@ -59,44 +57,22 @@ void updateIMU() {
 float getGyroYRate() {
   // (gyroAdc-gyroZero)/Sensitivity (In quids) - Sensitivity = 0.00333/3.3=0.001009091
   // (gyroAdc - gyroZero) * scale
-  float rateY = ((getRawGyroY() - zeroIMUValues[3]) / GYRO_SCALE);
+  float rateY = (getRawGyroY() / GYRO_SCALE);
   //        Serial.print(rateY); Serial.print('\t');
   return rateY;
 }
 
 float getAccY() {
-  float accXval = (getRawAccX() - zeroIMUValues[0]) / ACC_SCALE;
-  float accYval = (getRawAccY() - zeroIMUValues[1]) / ACC_SCALE;
+  float accXval = getRawAccX() / ACC_SCALE;
+  float accYval = getRawAccY() / ACC_SCALE;
   accYval--; //-1g when lying down
-  float accZval = (getRawAccZ() - zeroIMUValues[2]) / ACC_SCALE;
+  float accZval = getRawAccZ() / ACC_SCALE;
 
   float R = sqrt(pow(accXval, 2) + pow(accYval, 2) + pow(accZval, 2)); // Calculate the length of force vector
   float angleY = acos(accYval / R) * RADIAN_TO_DEGREE	;
 
   //        Serial.print(angleY); Serial.print('\n');
   return angleY;
-}
-
-/* ====================================
- ============ CALIBRATION =============
- ====================================== */
-void calibrateIMU() {
-  // add CALIBRATE_NUM_TIMES
-  for (int i = 0; i < CALIBRATE_NUM_TIMES; i++) {
-    IMU.getValues(rawIMUValues);
-    zeroIMUValues[0] += getRawAccX();
-    zeroIMUValues[1] += getRawAccY();
-    zeroIMUValues[2] += getRawAccZ();
-    zeroIMUValues[3] += getRawGyroY();
-    printRawIMUValues();
-  }
-
-  // average
-  for (int i = 0; i < 4; i++) {
-    zeroIMUValues[i] /= CALIBRATE_NUM_TIMES;
-    Serial.println("----------------calibrated-----------------");
-    Serial.println(zeroIMUValues[i]);
-  }
 }
 
 /* ====================================
