@@ -1,28 +1,36 @@
 /* -----------------------------
- * ----------- IMU ------------- 
+ * ------- PREPROCESSOR -------- 
  * ----------------------------- */
-// libraries
+
 #include <Wire.h>
 #include <FreeSixIMU.h>
 #include <FIMU_ADXL345.h>
 #include <FIMU_ITG3200.h>
+#include <Kalman.h>
 
-FreeSixIMU IMU;
-const int AvgAngles = 3;
+#define FORWARD 0
+#define BACKWARD 1
 
-/* UPDATE IMU ANGLE
- ---------------------------- */
-float angles[5];
-float currAngle, prevAngle;
-float prevAngles[AvgAngles];
-int prevAnglesArrayIndex = 0;
-float anglesSum = 0;
+/* -----------------------------
+ * ----------- IMU ------------- 
+ * ----------------------------- */
 
-/* CALIBRATE IMU ANGLE
- ---------------------------- */
-float calibrateSum = 0;
-float zeroAngle = 0;
+FreeSixIMU IMU = FreeSixIMU();
+Kalman kalman;
+
+float rawIMUValues[6] = {0, 0, 0, 0, 0, 0};
+int zeroIMUAngle = 90;
+
+const float GYRO_SCALE = 0.001009091;
+const float ACC_SCALE = 0.1;
+
+const float RADIAN_TO_DEGREE = float(180 / 3.14);
+
 const int CALIBRATE_NUM_TIMES = 200;
+
+unsigned long lastTime = 0;
+
+double pitch = 0;
 
 /* -----------------------------
  * ---------- MOTOR ------------ 
@@ -37,27 +45,18 @@ const int MOTOR_PWM = 9;
 const int MOTOR_IN_A = 10;
 const int MOTOR_IN_B = 11;
 
-enum Direction {
-  FORWARD,
-  BACKWARD,
-};
+
 
 /* -----------------------------
  * ------ PID CONSTANTS -------- 
  * ----------------------------- */
 const float kP = 10.0;
-float setpoint;
+float setpoint = 0;
 float command;
 
-/* -----------------------------
- * --- FUNCTION PROTOTYPES ----- 
- * ----------------------------- */
-void calibrateIMU();
-void updateAngle();
-float readIMU_Y();
-void moveMotors(Direction direction, int speed);
-void updateMotorsPID();
-
+/* ====================================
+ ================ SETUP ===============
+ ====================================== */
 void setup() {
   Serial.begin(9600);
   
@@ -69,32 +68,37 @@ void setup() {
   // IMU initialization
   Wire.begin(); // IMU connection
 
-  IMU = FreeSixIMU();
   delay(5);
-  IMU.init(); // Begin the IMU
+  IMU.init(); // begin the IMU
   delay(5);
-
-  calibrateIMU();
-
-  setpoint = zeroAngle;
 }
 
 void loop() {
-  updateAngle();
+  updateIMU();
+
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
+  Serial.println(pitch);
+  lastTime = micros();
+  
   updateMotorsPID();
   
-  delay(10);
+//  delay(10);
 }
 
+/* ====================================
+ ============= MOVE MOTORS ============
+ ====================================== */
 void updateMotorsPID() {
-  command = kP * (currAngle - setpoint);
-  Direction direction = (command >= 0) ? FORWARD : BACKWARD;
+  command = kP * (pitch - setpoint);
+  int direction = (command >= 0) ? FORWARD : BACKWARD;
   int speed = min(abs(command), 255);
-  Serial.println(command);
+//  Serial.println(command);
   moveMotors(direction, speed);
 }
 
-void moveMotors(Direction direction, int speed) {
+
+
+void moveMotors(int direction, int speed) {
   // PWM values: 25% = 64; 50% = 127; 75% = 191; 100% = 255
   analogWrite(MOTOR_PWM, speed);
 
@@ -102,29 +106,58 @@ void moveMotors(Direction direction, int speed) {
   digitalWrite(MOTOR_IN_B, abs(1 - direction));
 }
 
-void calibrateIMU() {
-  for (int i = 0; i < CALIBRATE_NUM_TIMES; i++) {
-    calibrateSum += readIMU_Y();
-    Serial.println(readIMU_Y());
-  }
-  zeroAngle = calibrateSum / CALIBRATE_NUM_TIMES;
-
-  Serial.println("--------------- CALIBRATED ---------------");
-  Serial.println(zeroAngle);
-  Serial.println("--------------- CALIBRATED ---------------");
+/* ====================================
+ ====== GET PROCESSED IMU VALUES ======
+ ====================================== */
+void updateIMU() {
+  IMU.getValues(rawIMUValues);
+  getGyroYRate();
+  getAccY();
 }
 
-void updateAngle() {
-  prevAngles[prevAnglesArrayIndex] = readIMU_Y() - zeroAngle; // put calibrated pitch in prevAngles array
-  prevAnglesArrayIndex = (prevAnglesArrayIndex + 1) % AvgAngles; // increment prevAnglesArrayIndex index in prevAngles array
-
-  anglesSum = 0;
-  for (int i = 0; i < AvgAngles; i++) // average all angles in prevAngles array
-      anglesSum += prevAngles[i];
-  currAngle = anglesSum / AvgAngles;
+float getGyroYRate() {
+  // (gyroAdc-gyroZero)/Sensitivity (In quids) - Sensitivity = 0.00333/3.3=0.001009091
+  // (gyroAdc - gyroZero) * scale
+  float rateY = (getRawGyroY() / GYRO_SCALE);
+  //        Serial.print(rateY); Serial.print('\t');
+  return rateY;
 }
 
-float readIMU_Y() {
-  IMU.getYawPitchRoll(angles);
-  return angles[2];
+float getAccY() {
+  float accXval = getRawAccX() / ACC_SCALE;
+  float accYval = getRawAccY() / ACC_SCALE;
+  accYval--; //-1g when lying down
+  float accZval = getRawAccZ() / ACC_SCALE;
+
+  float R = sqrt(pow(accXval, 2) + pow(accYval, 2) + pow(accZval, 2)); // Calculate the length of force vector
+  float angleY = acos(accYval / R) * RADIAN_TO_DEGREE	;
+
+  //        Serial.print(angleY); Serial.print('\n');
+  return angleY;
+}
+
+/* ====================================
+ ========= GET RAW IMU VALUES =========
+ ====================================== */
+ float getRawGyroY() {
+  return rawIMUValues[4];
+}
+
+float getRawAccX() {
+  return rawIMUValues[0];
+}
+
+float getRawAccY() {
+  return rawIMUValues[1];
+}
+
+float getRawAccZ() {
+  return rawIMUValues[2];
+}
+
+void printRawIMUValues() {
+  Serial.print(rawIMUValues[0]); Serial.print('\t');
+  Serial.print(rawIMUValues[1]); Serial.print('\t');
+  Serial.print(rawIMUValues[2]); Serial.print('\t');
+  Serial.print(rawIMUValues[3]); Serial.print('\n');
 }
