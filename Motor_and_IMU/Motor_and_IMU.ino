@@ -37,15 +37,16 @@ double pitch = 0;
  * ----------------------------- */
 
 // motor PWM 
-const int MOTOR_PWM = 9; 
+const int L_MOTOR_PWM = 9; 
+const int R_MOTOR_PWM = 3;
 
 // change direction of motors
 // A = 1, B = 0 -- clockwise
 // A = 0, B = 1 -- counterclockwise
-const int MOTOR_IN_A = 10;
-const int MOTOR_IN_B = 11;
-
-
+const int L_MOTOR_IN_A = 10;
+const int L_MOTOR_IN_B = 11;
+const int R_MOTOR_IN_A = 5; 
+const int R_MOTOR_IN_B = 4;
 
 /* -----------------------------
  * ------ PID CONSTANTS -------- 
@@ -61,9 +62,13 @@ void setup() {
   Serial.begin(9600);
   
   // Arduino pins to motor driver
-  pinMode(MOTOR_PWM, OUTPUT);
-  pinMode(MOTOR_IN_A, OUTPUT);
-  pinMode(MOTOR_IN_B, OUTPUT);
+  pinMode(L_MOTOR_PWM, OUTPUT);
+  pinMode(L_MOTOR_IN_A, OUTPUT);
+  pinMode(L_MOTOR_IN_B, OUTPUT);
+
+  pinMode(R_MOTOR_PWM, OUTPUT);
+  pinMode(R_MOTOR_IN_A, OUTPUT);
+  pinMode(R_uuMOTOR_IN_B, OUTPUT);
   
   // IMU initialization
   Wire.begin(); // IMU connection
@@ -100,10 +105,13 @@ void updateMotorsPID() {
 
 void moveMotors(int direction, int speed) {
   // PWM values: 25% = 64; 50% = 127; 75% = 191; 100% = 255
-  analogWrite(MOTOR_PWM, speed);
+  analogWrite(L_MOTOR_PWM, speed);
+  analogWrite(R_MOTOR_PWM, speed);
 
-  digitalWrite(MOTOR_IN_A, direction);
-  digitalWrite(MOTOR_IN_B, abs(1 - direction));
+  digitalWrite(L_MOTOR_IN_A, direction);
+  digitalWrite(L_MOTOR_IN_B, abs(1 - direction));
+  digitalWrite(R_MOTOR_IN_A, direction);
+  digitalWrite(R_MOTOR_IN_B, abs(1 - direction));
 }
 
 /* ====================================
