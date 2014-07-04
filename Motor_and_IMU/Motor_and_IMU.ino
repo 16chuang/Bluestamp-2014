@@ -37,16 +37,16 @@ double pitch = 0;
  * ----------------------------- */
 
 // motor PWM 
-const int L_MOTOR_PWM = 9; 
-const int R_MOTOR_PWM = 3;
+const int L_MOTOR_PWM = 5; 
+const int R_MOTOR_PWM = 9;
 
 // change direction of motors
 // A = 1, B = 0 -- clockwise
 // A = 0, B = 1 -- counterclockwise
-const int L_MOTOR_IN_A = 10;
-const int L_MOTOR_IN_B = 11;
-const int R_MOTOR_IN_A = 5; 
-const int R_MOTOR_IN_B = 4;
+const int L_MOTOR_IN_A = 3;
+const int L_MOTOR_IN_B = 4;
+const int R_MOTOR_IN_A = 11; 
+const int R_MOTOR_IN_B = 10;
 
 /* -----------------------------
  * ------ PID CONSTANTS -------- 
@@ -68,7 +68,7 @@ void setup() {
 
   pinMode(R_MOTOR_PWM, OUTPUT);
   pinMode(R_MOTOR_IN_A, OUTPUT);
-  pinMode(R_uuMOTOR_IN_B, OUTPUT);
+  pinMode(R_MOTOR_IN_B, OUTPUT);
   
   // IMU initialization
   Wire.begin(); // IMU connection
