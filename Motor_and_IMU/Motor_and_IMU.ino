@@ -49,11 +49,15 @@ const int R_MOTOR_IN_A = 11;
 const int R_MOTOR_IN_B = 10;
 
 /* -----------------------------
- * ------ PID CONSTANTS -------- 
+ * ----------- PID ------------- 
  * ----------------------------- */
 const float kP = 10.0;
+const float kI = 0.0;
+const float kD = 0.0;
 float setpoint = 0;
 float command;
+float prevError = 0;
+float errorSum = 0;
 
 /* ====================================
  ================ SETUP ===============
@@ -91,17 +95,36 @@ void loop() {
 }
 
 /* ====================================
- ============= MOVE MOTORS ============
+ ========== PID + MOVE MOTORS =========
  ====================================== */
 void updateMotorsPID() {
-  command = kP * (pitch - setpoint);
+  command = pTerm() + iTerm() + dTerm();
   int direction = (command >= 0) ? FORWARD : BACKWARD;
   int speed = min(abs(command), 255);
 //  Serial.println(command);
   moveMotors(direction, speed);
 }
 
+float pTerm() {
+  return (kP * currentError());
+}
 
+float iTerm() {
+  errorSum += currentError();
+  float iTerm = kI * errorSum;
+  iterm = min(max(errorSum, -90), 90); // limit to between -90 and 90
+  return iTerm;
+}
+
+float dTerm() {
+  float dTerm = kD * (currentError() - prevError);
+  prevError = currentError();
+  return dTerm;
+}
+
+float currentError() {
+  return (pitch - setpoint);
+}
 
 void moveMotors(int direction, int speed) {
   // PWM values: 25% = 64; 50% = 127; 75% = 191; 100% = 255
