@@ -7,6 +7,7 @@
 #include <FIMU_ADXL345.h>
 #include <FIMU_ITG3200.h>
 #include <Kalman.h>
+#include <QueueList.h>
 
 #define FORWARD 0
 #define BACKWARD 1
@@ -19,14 +20,12 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0, 0, 0, 0, 0, 0};
-int zeroIMUAngle = 90;
+int zeroIMUAngle = 95;
 
 const float GYRO_SCALE = 0.001009091;
 const float ACC_SCALE = 0.1;
 
 const float RADIAN_TO_DEGREE = float(180 / 3.14);
-
-const int CALIBRATE_NUM_TIMES = 200;
 
 unsigned long lastTime = 0;
 
@@ -51,13 +50,16 @@ const int R_MOTOR_IN_B = 10;
 /* -----------------------------
  * ----------- PID ------------- 
  * ----------------------------- */
-const float kP = 10.0;
-const float kI = 0.0;
+const float kP = 25.0;
+const float kI = 0.01;
 const float kD = 0.0;
 float setpoint = 0;
 float command;
-float prevError = 0;
-float errorSum = 0;
+float prevError = 0.0;
+float errorSum = 0.0;
+float currentError = 0.0;
+
+QueueList <float> errorQueue;
 
 /* ====================================
  ================ SETUP ===============
@@ -80,50 +82,71 @@ void setup() {
   delay(5);
   IMU.init(); // begin the IMU
   delay(5);
+  
+  // get rid of the first IMU value (b/c ugly and random...)
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
+  Serial.print("FIRST KALMAN PITCH: "); Serial.println(pitch);
 }
 
-void loop() {
+void loop() {  
+  unsigned long loopStart = millis();
+  
   updateIMU();
 
   pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
-  Serial.println(pitch);
   lastTime = micros();
-  
+   
   updateMotorsPID();
   
-//  delay(10);
+  unsigned long loopEnd = millis() - loopStart;
+  Serial.print("loop end "); Serial.println(loopEnd);
 }
 
 /* ====================================
  ========== PID + MOVE MOTORS =========
  ====================================== */
 void updateMotorsPID() {
-  command = pTerm() + iTerm() + dTerm();
+  // calculate command
+  currentError = pitch - setpoint;
+  command = pTerm() + iTerm();
+  
+  Serial.print("COMMAND: "); Serial.print(command);
+  Serial.print('\t');
+  
+  // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
   int speed = min(abs(command), 255);
-//  Serial.println(command);
   moveMotors(direction, speed);
 }
 
 float pTerm() {
-  return (kP * currentError());
+  return (kP * currentError);
 }
 
 float iTerm() {
-  errorSum += currentError();
+  errorQueue.push(currentError); // always add current error to stack
+  errorSum += currentError;
+  
+  if (errorQueue.count() > 100) { // keeps as values for ~ __ seconds
+    errorSum -= errorQueue.peek();
+    Serial.print("popping "); Serial.print(errorQueue.peek()); Serial.print('\t');
+    errorQueue.pop();
+  }
+  
+  Serial.print("ERROR SUM: "); Serial.print(errorSum); 
+  Serial.print('\t'); 
+  Serial.print("CURRENT ERROR: "); Serial.print(currentError);
+  Serial.print('\t'); 
+  
   float iTerm = kI * errorSum;
-  iterm = min(max(errorSum, -90), 90); // limit to between -90 and 90
+//  iTerm = min(max(iTerm, -90), 90); // integral limit to between -90 and 90
   return iTerm;
 }
 
 float dTerm() {
-  float dTerm = kD * (currentError() - prevError);
-  prevError = currentError();
+  float dTerm = kD * (currentError - prevError);
+  prevError = currentError;
   return dTerm;
-}
-
-float currentError() {
-  return (pitch - setpoint);
 }
 
 void moveMotors(int direction, int speed) {
@@ -142,15 +165,17 @@ void moveMotors(int direction, int speed) {
  ====================================== */
 void updateIMU() {
   IMU.getValues(rawIMUValues);
-  getGyroYRate();
-  getAccY();
+//  getGyroYRate();
+//  getAccY();
 }
 
 float getGyroYRate() {
   // (gyroAdc-gyroZero)/Sensitivity (In quids) - Sensitivity = 0.00333/3.3=0.001009091
   // (gyroAdc - gyroZero) * scale
   float rateY = (getRawGyroY() / GYRO_SCALE);
-  //        Serial.print(rateY); Serial.print('\t');
+  
+//  Serial.print(rateY); Serial.print('\t');
+  
   return rateY;
 }
 
@@ -163,7 +188,8 @@ float getAccY() {
   float R = sqrt(pow(accXval, 2) + pow(accYval, 2) + pow(accZval, 2)); // Calculate the length of force vector
   float angleY = acos(accYval / R) * RADIAN_TO_DEGREE	;
 
-  //        Serial.print(angleY); Serial.print('\n');
+//  Serial.print(angleY); Serial.print('\t');
+  
   return angleY;
 }
 
@@ -190,5 +216,5 @@ void printRawIMUValues() {
   Serial.print(rawIMUValues[0]); Serial.print('\t');
   Serial.print(rawIMUValues[1]); Serial.print('\t');
   Serial.print(rawIMUValues[2]); Serial.print('\t');
-  Serial.print(rawIMUValues[3]); Serial.print('\n');
+  Serial.print(rawIMUValues[4]); Serial.print('\t');
 }

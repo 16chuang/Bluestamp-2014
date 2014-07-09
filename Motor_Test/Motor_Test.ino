@@ -1,13 +1,13 @@
 // motor PWM 
-const int MOTOR_PWM = 9; 
+const int MOTOR_PWM = 5; 
 
 // change direction of motors
 // A = 1, B = 1 -- brake to Vcc
 // A = 1, B = 0 -- clockwise
 // A = 0, B = 1 -- counterclockwise
 // A = 0, B = 0 -- brake to GND
-const int MOTOR_IN_A = 10;
-const int MOTOR_IN_B = 11;
+const int MOTOR_IN_A = 3;
+const int MOTOR_IN_B = 4;
 
 /* ENCODERS 
  * ----------------------------- */
@@ -39,10 +39,10 @@ void loop() {
   analogWrite(MOTOR_PWM, 127);
 
   // turn counter-clockwise
-  digitalWrite(MOTOR_IN_A, LOW);
+  digitalWrite(MOTOR_IN_B, LOW);
   digitalWrite(MOTOR_IN_B, HIGH);
   
-  readEncoder();
+//  readEncoder();
 
   delay(10);
 }
