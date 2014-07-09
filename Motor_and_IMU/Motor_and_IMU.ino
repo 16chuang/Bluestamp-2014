@@ -19,17 +19,18 @@
 FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
-float rawIMUValues[6] = {0, 0, 0, 0, 0, 0};
-int zeroIMUAngle = 95;
+float rawIMUValues[6] = {0, 0, 0, 0, 0, 0}; // array passed to IMU object to be filled up with raw values
+int zeroIMUAngle = 95; // 90 + 5 (offset from observations)
 
+// sensor scale factors taken from TKJ Electronics' code
 const float GYRO_SCALE = 0.001009091;
 const float ACC_SCALE = 0.1;
 
-const float RADIAN_TO_DEGREE = float(180 / 3.14);
+const float RADIAN_TO_DEGREE = float(180 / 3.14); // for use in accelerometer angle calculation
 
-unsigned long lastTime = 0;
+unsigned long lastTime = 0; // passsed into kalman filter
 
-double pitch = 0;
+double pitch = 0; // stores filtered pitch of robot
 
 /* -----------------------------
  * ---------- MOTOR ------------ 
@@ -40,8 +41,6 @@ const int L_MOTOR_PWM = 5;
 const int R_MOTOR_PWM = 9;
 
 // change direction of motors
-// A = 1, B = 0 -- clockwise
-// A = 0, B = 1 -- counterclockwise
 const int L_MOTOR_IN_A = 3;
 const int L_MOTOR_IN_B = 4;
 const int R_MOTOR_IN_A = 11; 
@@ -50,16 +49,21 @@ const int R_MOTOR_IN_B = 10;
 /* -----------------------------
  * ----------- PID ------------- 
  * ----------------------------- */
+
+// gains
 const float kP = 25.0;
 const float kI = 0.01;
 const float kD = 0.0;
+
 float setpoint = 0;
 float command;
-float prevError = 0.0;
-float errorSum = 0.0;
-float currentError = 0.0;
 
-QueueList <float> errorQueue;
+float currentError = 0.0;
+float prevError = 0.0;
+
+// for use in integral term calculation
+float errorSum = 0.0;
+QueueList <float> errorQueue; 
 
 /* ====================================
  ================ SETUP ===============
@@ -78,26 +82,32 @@ void setup() {
   
   // IMU initialization
   Wire.begin(); // IMU connection
-
   delay(5);
   IMU.init(); // begin the IMU
   delay(5);
   
-  // get rid of the first IMU value (b/c ugly and random...)
+  // read and get rid of the first IMU value (b/c huge, ugly, and random...)
   pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
   Serial.print("FIRST KALMAN PITCH: "); Serial.println(pitch);
 }
 
+/* ====================================
+ ================ LOOP ================
+ ====================================== */
 void loop() {  
   unsigned long loopStart = millis();
   
+  // get raw acc and gyro readings
   updateIMU();
 
+  // filter readings to get pitch
   pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
   lastTime = micros();
-   
+  
+  // use pitch and PID controller to calculate motor command
   updateMotorsPID();
   
+  // print loop time
   unsigned long loopEnd = millis() - loopStart;
   Serial.print("loop end "); Serial.println(loopEnd);
 }
@@ -124,10 +134,11 @@ float pTerm() {
 }
 
 float iTerm() {
+  // calculate sum of last 100 errors
   errorQueue.push(currentError); // always add current error to stack
   errorSum += currentError;
   
-  if (errorQueue.count() > 100) { // keeps as values for ~ __ seconds
+  if (errorQueue.count() > 100) { // keeps most recent 100 values
     errorSum -= errorQueue.peek();
     Serial.print("popping "); Serial.print(errorQueue.peek()); Serial.print('\t');
     errorQueue.pop();
@@ -154,6 +165,7 @@ void moveMotors(int direction, int speed) {
   analogWrite(L_MOTOR_PWM, speed);
   analogWrite(R_MOTOR_PWM, speed);
 
+  // direction
   digitalWrite(L_MOTOR_IN_A, direction);
   digitalWrite(L_MOTOR_IN_B, abs(1 - direction));
   digitalWrite(R_MOTOR_IN_A, direction);
@@ -165,10 +177,9 @@ void moveMotors(int direction, int speed) {
  ====================================== */
 void updateIMU() {
   IMU.getValues(rawIMUValues);
-//  getGyroYRate();
-//  getAccY();
 }
 
+// taken from TKJ Electronics' code
 float getGyroYRate() {
   // (gyroAdc-gyroZero)/Sensitivity (In quids) - Sensitivity = 0.00333/3.3=0.001009091
   // (gyroAdc - gyroZero) * scale
@@ -179,6 +190,7 @@ float getGyroYRate() {
   return rateY;
 }
 
+// taken from TKJ Electronics' code
 float getAccY() {
   float accXval = getRawAccX() / ACC_SCALE;
   float accYval = getRawAccY() / ACC_SCALE;
