@@ -20,7 +20,7 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0, 0, 0, 0, 0, 0}; // array passed to IMU object to be filled up with raw values
-int zeroIMUAngle = 95; // 90 + 5 (offset from observations)
+int zeroIMUAngle = 92.3; // 90 + 5 (offset from observations)
 
 // sensor scale factors taken from TKJ Electronics' code
 const float GYRO_SCALE = 0.001009091;
@@ -28,7 +28,7 @@ const float ACC_SCALE = 0.1;
 
 const float RADIAN_TO_DEGREE = float(180 / 3.14); // for use in accelerometer angle calculation
 
-unsigned long lastTime = 0; // passsed into kalman filter
+unsigned long lastTimeKalman = 0; // passsed into kalman filter
 
 double pitch = 0; // stores filtered pitch of robot
 
@@ -51,9 +51,15 @@ const int R_MOTOR_IN_B = 10;
  * ----------------------------- */
 
 // gains
-const float kP = 25.0;
-const float kI = 0.01;
-const float kD = 0.0;
+const float kP = 20.0;
+const float kI = 0.0;
+const float kD = 1.0;
+
+// to keep constant sample time
+const int dt = 20; // sample time = 0.1 seconds
+unsigned long nowTime = 0;
+unsigned long lastTime = 0;
+unsigned long timeChange = 0;
 
 float setpoint = 0;
 float command;
@@ -86,30 +92,30 @@ void setup() {
   IMU.init(); // begin the IMU
   delay(5);
   
-  // read and get rid of the first IMU value (b/c huge, ugly, and random...)
-  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
-  Serial.print("FIRST KALMAN PITCH: "); Serial.println(pitch);
+  // read and get rid of the first IMU value (b/c huge and random b/c time is 0)
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000000)) - zeroIMUAngle;
 }
 
 /* ====================================
  ================ LOOP ================
  ====================================== */
 void loop() {  
-  unsigned long loopStart = millis();
+  nowTime = millis();
+//  Serial.println(millis());
+  timeChange = nowTime - lastTime;
   
   // get raw acc and gyro readings
   updateIMU();
 
   // filter readings to get pitch
-  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000)) - zeroIMUAngle;
-  lastTime = micros();
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTimeKalman) / 1000)) - zeroIMUAngle;
+  lastTimeKalman = micros();
   
-  // use pitch and PID controller to calculate motor command
-  updateMotorsPID();
-  
-  // print loop time
-  unsigned long loopEnd = millis() - loopStart;
-  Serial.print("loop end "); Serial.println(loopEnd);
+  if (timeChange >= dt) {
+    // use pitch and PID controller to calculate motor command
+    updateMotorsPID();
+    lastTime = nowTime;
+  }
 }
 
 /* ====================================
@@ -118,10 +124,9 @@ void loop() {
 void updateMotorsPID() {
   // calculate command
   currentError = pitch - setpoint;
-  command = pTerm() + iTerm();
+  command = pTerm() + iTerm() + dTerm();
   
-  Serial.print("COMMAND: "); Serial.print(command);
-  Serial.print('\t');
+  Serial.print("COMMAND: "); Serial.println(command);
   
   // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
@@ -139,18 +144,16 @@ float iTerm() {
   errorSum += currentError;
   
   if (errorQueue.count() > 100) { // keeps most recent 100 values
-    errorSum -= errorQueue.peek();
-    Serial.print("popping "); Serial.print(errorQueue.peek()); Serial.print('\t');
-    errorQueue.pop();
+    errorSum -= errorQueue.pop();
   }
   
-  Serial.print("ERROR SUM: "); Serial.print(errorSum); 
-  Serial.print('\t'); 
+//  Serial.print("ERROR SUM: "); Serial.print(errorSum); 
+//  Serial.print('\t'); 
   Serial.print("CURRENT ERROR: "); Serial.print(currentError);
   Serial.print('\t'); 
   
   float iTerm = kI * errorSum;
-//  iTerm = min(max(iTerm, -90), 90); // integral limit to between -90 and 90
+//  iTerm = constrain(iTerm, -90, 90) // integral limit to between -90 and 90
   return iTerm;
 }
 
