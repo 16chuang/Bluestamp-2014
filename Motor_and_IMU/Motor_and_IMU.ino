@@ -130,7 +130,7 @@ void updateMotorsPID() {
   
   // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
-  int speed = min(abs(command), 255);
+  int speed = min(abs(command), 150);
   moveMotors(direction, speed);
 }
 
