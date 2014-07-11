@@ -22,7 +22,7 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-int zeroIMUAngle = 92.3; // 90 + 5 (offset from observations)
+float zeroIMUAngle = 92.3; // 90 + offset from observations
 
 // sensor scale factors taken from TKJ Electronics' code
 //const float GYRO_SCALE = 0.001009091;
@@ -54,15 +54,13 @@ const int R_MOTOR_IN_B = 10;
  * ----------------------------- */
 
 // gains
-const float kP = 4.5;
+const float kP = 10.0;
 const float kI = 0.0;
 const float kD = 0.0;
 
 // to keep constant sample time
-const int dt = 20; // sample time = 0.1 seconds
-unsigned long nowTime = 0;
-unsigned long lastTime = 0;
-unsigned long timeChange = 0;
+const int responseRate = 50; // how fast program will send command to motor
+unsigned long responseTimerStart = 0;
 
 float setpoint = 0;
 float command;
@@ -96,31 +94,24 @@ void setup() {
   delay(5);
 
   // read and get rid of the first IMU value (b/c huge and random b/c time is 0)
-  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000000)) - zeroIMUAngle;
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTimeKalman) / 1000000)) - zeroIMUAngle;
+
+  responseTimerStart = millis();
 }
 
 /* ====================================
  ================ LOOP ================
  ====================================== */
 void loop() {
-  nowTime = millis();
-  timeChange = nowTime - lastTime;
-
   // get raw acc and gyro readings
   updateIMU();
 
-
-  //  printRawIMUValues();
-
   // filter readings to get pitch
-  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTimeKalman) / 1000)) - zeroIMUAngle;
+  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTimeKalman) / 1000000)) - zeroIMUAngle;
   lastTimeKalman = micros();
 
-  if (timeChange >= dt) {
-    // use pitch and PID controller to calculate motor command
-    updateMotorsPID();
-    lastTime = nowTime;
-  }
+  // use pitch and PID controller to calculate motor command
+  updateMotorsPID();
 }
 
 /* ====================================
@@ -130,12 +121,17 @@ void updateMotorsPID() {
   // calculate command
   currentError = pitch - setpoint;
   command = pTerm() + iTerm() + dTerm();
-
-  // send command to motors
-  int direction = (command >= 0) ? FORWARD : BACKWARD;
-  int speed = min(abs(command), 255);
-  Serial.println(speed);
-  moveMotors(direction, speed);
+  
+  if (millis() - responseTimerStart > responseRate) {
+    // send command to motors
+    int direction = (command >= 0) ? FORWARD : BACKWARD;
+    int speed = min(abs(command), 200);
+    moveMotors(direction, speed);
+    // reset start time
+    responseTimerStart = millis();
+  }
+  
+  Serial.println(responseTimerStart);
 }
 
 float pTerm() {
@@ -150,10 +146,6 @@ float iTerm() {
   if (errorQueue.count() > 100) { // keeps most recent 100 values
     errorSum -= errorQueue.pop();
   }
-
-  //  Serial.print("ERROR SUM: "); Serial.print(errorSum);
-  //  Serial.print('\t');
-  //  Serial.println(currentError);
 
   float iTerm = kI * errorSum;
   //  iTerm = constrain(iTerm, -90, 90) // integral limit to between -90 and 90
