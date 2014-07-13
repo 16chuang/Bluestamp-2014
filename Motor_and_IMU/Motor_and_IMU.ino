@@ -54,7 +54,7 @@ const int R_MOTOR_IN_B = 10;
  * ----------------------------- */
 
 // gains
-const float kP = 4.5;
+const float kP = 5.0;
 const float kI = 0.0;
 const float kD = 0.0;
 
