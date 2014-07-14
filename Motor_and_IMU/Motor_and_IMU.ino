@@ -22,11 +22,11 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-int zeroIMUAngle = 92.3; // 90 + 5 (offset from observations)
+int zeroIMUAngle = 91; // 90 + 5 (offset from observations)
 
 // sensor scale factors taken from TKJ Electronics' code
 //const float GYRO_SCALE = 0.001009091;
-const float GYRO_SCALE = 0.1;
+const float GYRO_SCALE = 1;
 const float ACC_SCALE = 0.1;
 
 const float RADIAN_TO_DEGREE = float(180 / 3.14); // for use in accelerometer angle calculation
@@ -54,9 +54,9 @@ const int R_MOTOR_IN_B = 10;
  * ----------------------------- */
 
 // gains
-const float kP = 5.0;
-const float kI = 0.0;
-const float kD = 0.0;
+const float kP = 60.0;
+const float kI = 0.4;
+const float kD = 30.0;
 
 // to keep constant sample time
 const int dt = 20; // sample time = 0.1 seconds
@@ -73,6 +73,14 @@ float prevError = 0.0;
 // for use in integral term calculation
 float errorSum = 0.0;
 QueueList <float> errorQueue;
+
+/* -----------------------------
+ * ------ COMPLEMENTARY --------
+ * ----------------------------- */
+unsigned long loopTime = 0;
+const float complementaryConstant = 0.98;
+float lastPitch = 0;
+unsigned long lastStartTime = 0;
 
 /* ====================================
  ================ SETUP ===============
@@ -104,6 +112,7 @@ void setup() {
  ====================================== */
 void loop() {
   nowTime = millis();
+  loopTime = nowTime - lastStartTime;
   timeChange = nowTime - lastTime;
 
   // get raw acc and gyro readings
@@ -113,14 +122,21 @@ void loop() {
   //  printRawIMUValues();
 
   // filter readings to get pitch
-  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTimeKalman) / 1000)) - zeroIMUAngle;
-  lastTimeKalman = micros();
+//  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTimeKalman) / 1000)) - zeroIMUAngle;
+//  lastTimeKalman = micros();
+
+    pitch = complementaryConstant * (lastPitch + getGyroYRate() * loopTime/1000) + (1 - complementaryConstant) * (getAccY() - zeroIMUAngle);
+    lastPitch = pitch;
+    
+    Serial.println(pitch);
 
   if (timeChange >= dt) {
     // use pitch and PID controller to calculate motor command
     updateMotorsPID();
     lastTime = nowTime;
   }
+  
+  lastStartTime = nowTime;
 }
 
 /* ====================================
@@ -134,7 +150,7 @@ void updateMotorsPID() {
   // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
   int speed = min(abs(command), 255);
-  Serial.println(speed);
+//  Serial.println(speed);
   moveMotors(direction, speed);
 }
 
