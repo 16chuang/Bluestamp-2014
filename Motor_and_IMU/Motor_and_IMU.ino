@@ -22,7 +22,7 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-float zeroIMUAngle = 91.5; // 90 + 5 (offset from observations)
+float zeroIMUAngle = 92.25; // 90 + 5 (offset from observations)
 
 // sensor scale factors taken from TKJ Electronics' code
 //const float GYRO_SCALE = 0.001009091;
@@ -49,14 +49,15 @@ const int L_MOTOR_IN_B = 4;
 const int R_MOTOR_IN_A = 11;
 const int R_MOTOR_IN_B = 10;
 
-const float DEADBAND_PITCH = 1.0;
+const float DEADBAND_PITCH = 1.25;
 
 /* -----------------------------
  * ----------- PID -------------
  * ----------------------------- */
 
 // gains
-const float kP = 70.0;
+const float kP_MAX = 70.0;
+float kP = kP_MAX;
 const float kI = 0.4;
 const float kD = 0.5;
 
@@ -104,9 +105,6 @@ void setup() {
   delay(5);
   IMU.init(); // begin the IMU
   delay(5);
-
-  // read and get rid of the first IMU value (b/c huge and random b/c time is 0)
-//  pitch = kalman.getAngle(double(getAccY()), double(getGyroYRate()), double((micros() - lastTime) / 1000000)) - zeroIMUAngle;
 }
 
 /* ====================================
@@ -123,9 +121,7 @@ void loop() {
   // complementary filter
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
-  
-  Serial.println(pitch);
-  
+   
   if (timeChange >= dt) {
     // use pitch and PID controller to calculate motor command
     updateMotorsPID();
@@ -145,12 +141,15 @@ void updateMotorsPID() {
 
   // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
-  int speed = (abs(pitch) < DEADBAND_PITCH) ? 0 : min(abs(command), 255);
+  int speed = min(abs(command), 255);
   
   moveMotors(direction, speed);
 }
 
 float pTerm() {
+  float scale = abs(pitch)/DEADBAND_PITCH;
+  kP = min(scale * kP_MAX, kP_MAX);
+  Serial.println(kP);
   return (kP * currentError);
 }
 
@@ -162,10 +161,6 @@ float iTerm() {
   if (errorQueue.count() > 100) { // keeps most recent 100 values
     errorSum -= errorQueue.pop();
   }
-
-  //  Serial.print("ERROR SUM: "); Serial.print(errorSum);
-  //  Serial.print('\t');
-  //  Serial.println(currentError);
 
   float iTerm = kI * errorSum;
   //  iTerm = constrain(iTerm, -90, 90) // integral limit to between -90 and 90
@@ -199,8 +194,6 @@ void updateIMU() {
 
 // taken from TKJ Electronics' code
 float getGyroYRate() {
-  // (gyroAdc-gyroZero)/Sensitivity (In quids) - Sensitivity = 0.00333/3.3=0.001009091
-  // (gyroAdc - gyroZero) * scale
   float rateY = (getRawGyroY() / GYRO_SCALE);
 
   return rateY;
