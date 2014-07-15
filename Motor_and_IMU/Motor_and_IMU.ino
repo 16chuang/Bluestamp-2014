@@ -49,6 +49,8 @@ const int L_MOTOR_IN_B = 4;
 const int R_MOTOR_IN_A = 11;
 const int R_MOTOR_IN_B = 10;
 
+const float DEADBAND_PITCH = 1.0;
+
 /* -----------------------------
  * ----------- PID -------------
  * ----------------------------- */
@@ -56,7 +58,7 @@ const int R_MOTOR_IN_B = 10;
 // gains
 const float kP = 70.0;
 const float kI = 0.4;
-const float kD = 10.0 / 0.003;
+const float kD = 0.5;
 
 // to keep constant sample time
 const int dt = 1; // sample time = 0.1 seconds
@@ -113,7 +115,6 @@ void setup() {
 void loop() {
   nowTime = millis();
   loopTime = nowTime - lastStartTime;
-  Serial.println(loopTime);
   timeChange = nowTime - lastTime;
 
   // get raw acc and gyro readings
@@ -123,8 +124,8 @@ void loop() {
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
   
-//  Serial.println(pitch);
-
+  Serial.println(pitch);
+  
   if (timeChange >= dt) {
     // use pitch and PID controller to calculate motor command
     updateMotorsPID();
@@ -144,11 +145,9 @@ void updateMotorsPID() {
 
   // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
-  int speed = min(abs(command), 255);
-  //  Serial.println(speed);
+  int speed = (abs(pitch) < DEADBAND_PITCH) ? 0 : min(abs(command), 255);
+  
   moveMotors(direction, speed);
-
-//  Serial.println(command);
 }
 
 float pTerm() {
@@ -174,8 +173,8 @@ float iTerm() {
 }
 
 float dTerm() {
-  float dTerm = kD * (currentError - prevError);
-  prevError = currentError;
+  float dTerm = kD * getGyroYRate();
+//  prevError = currentError;
   return dTerm;
 }
 
