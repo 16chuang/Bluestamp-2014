@@ -22,7 +22,7 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-float zeroIMUAngle = 92.25; // 90 + 5 (offset from observations)
+float zeroIMUAngle = 92.7; // 90 + 5 (offset from observations)
 
 // sensor scale factors taken from TKJ Electronics' code
 //const float GYRO_SCALE = 0.001009091;
@@ -147,8 +147,12 @@ void updateMotorsPID() {
 }
 
 float pTerm() {
-  float scale = abs(pitch)/DEADBAND_PITCH;
-  kP = min(scale * kP_MAX, kP_MAX);
+  // gain scheduling
+//  float scale = abs(pitch)/DEADBAND_PITCH;
+//  kP = min(scale * kP_MAX, kP_MAX);
+
+  kP = min(abs(((50 * pow(pitch, 2)) + (30 * pitch))), kP_MAX);
+  
   Serial.println(kP);
   return (kP * currentError);
 }
