@@ -14,6 +14,9 @@
 #define FORWARD 0
 #define BACKWARD 1
 
+#define R_MOTOR 0
+#define L_MOTOR 1
+
 /* -----------------------------
  * ----------- IMU -------------
  * ----------------------------- */
@@ -22,7 +25,7 @@ FreeSixIMU IMU = FreeSixIMU();
 Kalman kalman;
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-float zeroIMUAngle = 92.7; // 90 + 5 (offset from observations)
+float zeroIMUAngle = 92.77; // 90 + 5 (offset from observations)
 
 // sensor scale factors taken from TKJ Electronics' code
 //const float GYRO_SCALE = 0.001009091;
@@ -143,7 +146,8 @@ void updateMotorsPID() {
   int direction = (command >= 0) ? FORWARD : BACKWARD;
   int speed = min(abs(command), 255);
   
-  moveMotors(direction, speed);
+  moveMotor(R_MOTOR, direction, speed);
+  moveMotor(L_MOTOR, direction, speed);
 }
 
 float pTerm() {
@@ -177,16 +181,17 @@ float dTerm() {
   return dTerm;
 }
 
-void moveMotors(int direction, int speed) {
+void moveMotor(int motor, int direction, int speed) {
   // PWM values: 25% = 64; 50% = 127; 75% = 191; 100% = 255
-  analogWrite(L_MOTOR_PWM, speed);
-  analogWrite(R_MOTOR_PWM, speed);
-
-  // direction
-  digitalWrite(L_MOTOR_IN_A, direction);
-  digitalWrite(L_MOTOR_IN_B, abs(1 - direction));
-  digitalWrite(R_MOTOR_IN_A, direction);
-  digitalWrite(R_MOTOR_IN_B, abs(1 - direction));
+  if (motor == R_MOTOR) {
+    analogWrite(R_MOTOR_PWM, speed);
+    digitalWrite(R_MOTOR_IN_A, direction);
+    digitalWrite(R_MOTOR_IN_B, abs(1 - direction));
+  } else if (motor == L_MOTOR) {
+    analogWrite(L_MOTOR_PWM, speed);
+    digitalWrite(L_MOTOR_IN_A, direction);
+    digitalWrite(L_MOTOR_IN_B, abs(1 - direction));
+  }
 }
 
 /* ====================================
