@@ -1,9 +1,7 @@
 /* -----------------------------
  * ------- PREPROCESSOR --------
  * ----------------------------- */
-
 #include <Wire.h>
-#include <Kalman.h>
 #include <QueueList.h>
 #include <CommunicationUtils.h>
 #include <DebugUtils.h>
@@ -11,53 +9,58 @@
 #include <FIMU_ITG3200.h>
 #include <FreeSixIMU.h>
 
+// direction
 #define FORWARD 0
 #define BACKWARD 1
 
+// motor
 #define R_MOTOR 0
 #define L_MOTOR 1
 
 /* -----------------------------
  * ----------- IMU -------------
  * ----------------------------- */
-
 FreeSixIMU IMU = FreeSixIMU();
-Kalman kalman;
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-float zeroIMUAngle = 92.77; // 90 + 5 (offset from observations)
+float zeroIMUAngle = 92.6; // 90 + 5 (offset from observations)
 
-// sensor scale factors taken from TKJ Electronics' code
-//const float GYRO_SCALE = 0.001009091;
-const float GYRO_SCALE = 1;
-const float ACC_SCALE = 0.1;
+// sensor scale factors
+const float GYRO_SCALE = 1; // already taken care of in FreeSixIMU library
+const float ACC_SCALE = 0.1; // taken from TKJ Electronics' code
 
 const float RADIAN_TO_DEGREE = float(180 / 3.14); // for use in accelerometer angle calculation
-
-unsigned long lastTimeKalman = 0; // passsed into kalman filter
 
 double pitch = 0; // stores filtered pitch of robot
 
 /* -----------------------------
  * ---------- MOTOR ------------
  * ----------------------------- */
-
 // motor PWM
-const int L_MOTOR_PWM = 5;
+const int L_MOTOR_PWM = 6;
 const int R_MOTOR_PWM = 9;
 
 // change direction of motors
-const int L_MOTOR_IN_A = 3;
-const int L_MOTOR_IN_B = 4;
+const int L_MOTOR_IN_A = 4;
+const int L_MOTOR_IN_B = 5;
 const int R_MOTOR_IN_A = 11;
 const int R_MOTOR_IN_B = 10;
 
+// deadband pitch
 const float DEADBAND_PITCH = 1.25;
+
+// encoders
+const int L_ENCODER_A = 2;
+const int L_ENCODER_B = 7;
+const int R_ENCODER_A = 3;
+const int R_ENCODER_B = 8;
+
+volatile long encoderRCount = 0;
+volatile long encoderLCount = 0;
 
 /* -----------------------------
  * ----------- PID -------------
  * ----------------------------- */
-
 // gains
 const float kP_MAX = 70.0;
 float kP = kP_MAX;
@@ -81,7 +84,7 @@ float errorSum = 0.0;
 QueueList <float> errorQueue;
 
 /* -----------------------------
- * ------ COMPLEMENTARY --------
+ * --- COMPLEMENTARY FILTER ----
  * ----------------------------- */
 unsigned long loopTime = 0;
 const float COMPLEMENTARY_GAIN = 0.985;
@@ -102,6 +105,16 @@ void setup() {
   pinMode(R_MOTOR_PWM, OUTPUT);
   pinMode(R_MOTOR_IN_A, OUTPUT);
   pinMode(R_MOTOR_IN_B, OUTPUT);
+
+  // Arduino pins to encoder
+  pinMode(L_ENCODER_A, INPUT);
+  pinMode(L_ENCODER_B, INPUT);
+  pinMode(R_ENCODER_A, INPUT);
+  pinMode(R_ENCODER_B, INPUT);
+
+  // encoder read interrupts
+  attachInterrupt(0, leftEncoder, RISING); // pin 2, low to high
+  attachInterrupt(1, rightEncoder, RISING); // pin 3, low to high
 
   // IMU initialization
   Wire.begin(); // IMU connection
@@ -124,7 +137,9 @@ void loop() {
   // complementary filter
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
-   
+
+  Serial.println(pitch);
+
   if (timeChange >= dt) {
     // use pitch and PID controller to calculate motor command
     updateMotorsPID();
@@ -145,19 +160,19 @@ void updateMotorsPID() {
   // send command to motors
   int direction = (command >= 0) ? FORWARD : BACKWARD;
   int speed = min(abs(command), 255);
-  
+
   moveMotor(R_MOTOR, direction, speed);
   moveMotor(L_MOTOR, direction, speed);
 }
 
 float pTerm() {
   // gain scheduling
-//  float scale = abs(pitch)/DEADBAND_PITCH;
-//  kP = min(scale * kP_MAX, kP_MAX);
+  //  float scale = abs(pitch)/DEADBAND_PITCH;
+  //  kP = min(scale * kP_MAX, kP_MAX);
 
-  kP = min(abs(((50 * pow(pitch, 2)) + (30 * pitch))), kP_MAX);
-  
-  Serial.println(kP);
+  kP = min(abs(((50 * pow(pitch, 2)) + (15 * pitch))), kP_MAX);
+
+  //  Serial.println(kP);
   return (kP * currentError);
 }
 
@@ -176,8 +191,9 @@ float iTerm() {
 }
 
 float dTerm() {
-  float dTerm = kD * getGyroYRate();
-//  prevError = currentError;
+  float dTerm = kD * (currentError - prevError);
+  //  float dTerm = kD * getGyroYRate();
+  prevError = currentError;
   return dTerm;
 }
 
@@ -191,6 +207,25 @@ void moveMotor(int motor, int direction, int speed) {
     analogWrite(L_MOTOR_PWM, speed);
     digitalWrite(L_MOTOR_IN_A, direction);
     digitalWrite(L_MOTOR_IN_B, abs(1 - direction));
+  }
+}
+
+/* ====================================
+ = ENCODER INTERRUPT SERVICE ROUTINES =
+ ====================================== */
+void leftEncoder() {
+  if (digitalRead(L_ENCODER_B) == LOW) {
+    encoderLCount++;
+  } else {
+    encoderLCount--;
+  }
+}
+
+void rightEncoder() {
+  if (digitalRead(R_ENCODER_B) == LOW) {
+    encoderRCount++;
+  } else {
+    encoderRCount--;
   }
 }
 
