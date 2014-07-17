@@ -17,13 +17,17 @@
 #define R_MOTOR 0
 #define L_MOTOR 1
 
+// encoder speed direction
+#define ENC_FORWARD 1;
+#define ENC_BACKWARD -1;
+
 /* -----------------------------
  * ----------- IMU -------------
  * ----------------------------- */
 FreeSixIMU IMU = FreeSixIMU();
 
 float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-float zeroIMUAngle = 92.6; // 90 + 5 (offset from observations)
+float zeroIMUAngle = 92.6; // 90 + offset from observations
 
 // sensor scale factors
 const float GYRO_SCALE = 1; // already taken care of in FreeSixIMU library
@@ -49,7 +53,10 @@ const int R_MOTOR_IN_B = 10;
 // deadband pitch
 const float DEADBAND_PITCH = 1.25;
 
-// encoders
+/* -----------------------------
+ * --------- ENCODERS ----------
+ * ----------------------------- */
+// encoder Arduino ports
 const int L_ENCODER_A = 2;
 const int L_ENCODER_B = 7;
 const int R_ENCODER_A = 3;
@@ -58,30 +65,47 @@ const int R_ENCODER_B = 8;
 volatile long encoderRCount = 0;
 volatile long encoderLCount = 0;
 
+bool leftEncTimeState, rightEncTimeState = true;
+long leftEnc_t1, rightEnc_t1 = 0;
+long leftEnc_t2, rightEnc_t2 = 0;
+long leftEnc_dt, rightEnc_dt = 0;
+
+int leftEncDirection, rightEncDirection = ENC_FORWARD;
+
+const int THRESHOLD_DT = 50; // number of milliseconds of not moving for speed to count as 0
+const float MILLIS_TO_SEC = 1000;
+
 /* -----------------------------
- * ----------- PID -------------
+ * ---- SPEED TO ANGLE PID -----
+ * ----------------------------- */
+const float kP_speed = 0;
+
+const float SPEED_SETPOINT = 0.0;
+
+/* -----------------------------
+ * ---- ANGLE TO MOTOR PID -----
  * ----------------------------- */
 // gains
-const float kP_MAX = 70.0;
-float kP = kP_MAX;
-const float kI = 0.4;
-const float kD = 0.5;
+const float kP_MAX_ANGLE = 70.0;
+float kP_angle = kP_MAX_ANGLE;
+const float kI_angle = 0.4;
+const float kD_angle = 0.5;
 
 // to keep constant sample time
-const int dt = 1; // sample time = 0.1 seconds
+const int dt = 1; // sample time = 0.001 seconds
 unsigned long nowTime = 0;
 unsigned long lastTime = 0;
 unsigned long timeChange = 0;
 
-float setpoint = 0;
-float command;
+float angleSetpoint = 0.0;
+float motorCommand;
 
-float currentError = 0.0;
-float prevError = 0.0;
+float currentAngleError = 0.0;
+float prevAngleError = 0.0;
 
 // for use in integral term calculation
-float errorSum = 0.0;
-QueueList <float> errorQueue;
+float angleErrorSum = 0.0;
+QueueList <float> angleErrorQueue;
 
 /* -----------------------------
  * --- COMPLEMENTARY FILTER ----
@@ -138,11 +162,12 @@ void loop() {
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
 
-  Serial.println(pitch);
+//  Serial.println(pitch);
 
   if (timeChange >= dt) {
-    // use pitch and PID controller to calculate motor command
-    updateMotorsPID();
+    // use pitch and PID controller to calculate motor motorCommand
+    speedToAnglePID();
+    angleToMotorPID();
     lastTime = nowTime;
   }
 
@@ -150,16 +175,39 @@ void loop() {
 }
 
 /* ====================================
- ========== PID + MOVE MOTORS =========
+ === SPEED TO ANGLE PID + GET SPEED ===
  ====================================== */
-void updateMotorsPID() {
-  // calculate command
-  currentError = pitch - setpoint;
-  command = pTerm() + iTerm() + dTerm();
+void speedToAnglePID() {
+  Serial.print(getLeftSpeed()); Serial.print('\t'); Serial.println(getRightSpeed());
+}
 
-  // send command to motors
-  int direction = (command >= 0) ? FORWARD : BACKWARD;
-  int speed = min(abs(command), 255);
+float getLeftSpeed() {
+  if ((millis() - leftEnc_t2) < THRESHOLD_DT) {
+    return leftEncDirection * (MILLIS_TO_SEC / leftEnc_dt);
+  } else {
+    return 0;
+  }
+}
+
+float getRightSpeed() {
+  if ((millis() - rightEnc_t2) < THRESHOLD_DT) {
+    return rightEncDirection * (MILLIS_TO_SEC / rightEnc_dt);
+  } else {
+    return 0;
+  }
+}
+
+/* ====================================
+ == ANGLE TO MOTOR PID + MOVE MOTORS ==
+ ====================================== */
+void angleToMotorPID() {
+  // calculate motorCommand
+  currentAngleError = pitch - angleSetpoint;
+  motorCommand = pTerm() + iTerm() + dTerm();
+
+  // send motorCommand to motors
+  int direction = (motorCommand >= 0) ? FORWARD : BACKWARD;
+  int speed = min(abs(motorCommand), 255);
 
   moveMotor(R_MOTOR, direction, speed);
   moveMotor(L_MOTOR, direction, speed);
@@ -168,32 +216,31 @@ void updateMotorsPID() {
 float pTerm() {
   // gain scheduling
   //  float scale = abs(pitch)/DEADBAND_PITCH;
-  //  kP = min(scale * kP_MAX, kP_MAX);
+  //  kP_angle = min(scale * kP_MAX_ANGLE, kP_MAX_ANGLE);
 
-  kP = min(abs(((50 * pow(pitch, 2)) + (15 * pitch))), kP_MAX);
+  kP_angle = min(abs(((55 * pow(pitch, 2)) + (20 * pitch) + 10)), kP_MAX_ANGLE);
 
-  //  Serial.println(kP);
-  return (kP * currentError);
+  return (kP_angle * currentAngleError);
 }
 
 float iTerm() {
   // calculate sum of last 100 errors
-  errorQueue.push(currentError); // always add current error to stack
-  errorSum += currentError;
+  angleErrorQueue.push(currentAngleError); // always add current error to stack
+  angleErrorSum += currentAngleError;
 
-  if (errorQueue.count() > 100) { // keeps most recent 100 values
-    errorSum -= errorQueue.pop();
+  if (angleErrorQueue.count() > 100) { // keeps most recent 100 values
+    angleErrorSum -= angleErrorQueue.pop();
   }
 
-  float iTerm = kI * errorSum;
+  float iTerm = kI_angle * angleErrorSum;
   //  iTerm = constrain(iTerm, -90, 90) // integral limit to between -90 and 90
   return iTerm;
 }
 
 float dTerm() {
-  float dTerm = kD * (currentError - prevError);
-  //  float dTerm = kD * getGyroYRate();
-  prevError = currentError;
+  float dTerm = kD_angle * (currentAngleError - prevAngleError);
+  //  float dTerm = kD_angle * getGyroYRate();
+  prevAngleError = currentAngleError;
   return dTerm;
 }
 
@@ -214,18 +261,40 @@ void moveMotor(int motor, int direction, int speed) {
  = ENCODER INTERRUPT SERVICE ROUTINES =
  ====================================== */
 void leftEncoder() {
+  // determine direction
   if (digitalRead(L_ENCODER_B) == LOW) {
-    encoderLCount++;
+    leftEncDirection = ENC_FORWARD;
   } else {
-    encoderLCount--;
+    leftEncDirection = ENC_BACKWARD;
+  }
+  
+  // record dt time difference in milliseconds
+  if (leftEncTimeState) {
+    leftEnc_t1 = millis();
+    leftEncTimeState = false;
+  } else {
+    leftEnc_t2 = millis();
+    leftEnc_dt = leftEnc_t2 - leftEnc_t1;
+    leftEncTimeState = true;
   }
 }
 
 void rightEncoder() {
+  // determine direction
   if (digitalRead(R_ENCODER_B) == LOW) {
-    encoderRCount++;
+    rightEncDirection = ENC_FORWARD;
   } else {
-    encoderRCount--;
+    rightEncDirection = ENC_BACKWARD;
+  }
+  
+  // record dt time difference in milliseconds
+  if (rightEncTimeState) {
+    rightEnc_t1 = millis();
+    rightEncTimeState = false;
+  } else {
+    rightEnc_t2 = millis();
+    rightEnc_dt = rightEnc_t1 - rightEnc_t2;
+    rightEncTimeState = true;
   }
 }
 
@@ -238,9 +307,7 @@ void updateIMU() {
 
 // taken from TKJ Electronics' code
 float getGyroYRate() {
-  float rateY = (getRawGyroY() / GYRO_SCALE);
-
-  return rateY;
+  return (getRawGyroY() / GYRO_SCALE);
 }
 
 // taken from TKJ Electronics' code
@@ -272,11 +339,4 @@ float getRawAccY() {
 
 float getRawAccZ() {
   return rawIMUValues[2];
-}
-
-void printRawIMUValues() {
-  Serial.print(rawIMUValues[0]); Serial.print('\t');
-  Serial.print(rawIMUValues[1]); Serial.print('\t');
-  Serial.print(rawIMUValues[2]); Serial.print('\t');
-  Serial.print(rawIMUValues[3]); Serial.println('\t');
 }
