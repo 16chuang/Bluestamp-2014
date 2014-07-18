@@ -82,11 +82,11 @@ float smoothedRightSpeed, smoothedLeftSpeed = 0;
 /* -----------------------------
  * ---- SPEED TO ANGLE PID -----
  * ----------------------------- */
-const float kP_speed = 0.01;
-const float kI_speed = 0;
-const float kD_speed = 0;
+const float kP_speed = 0.015;
+const float kI_speed = 0.0001;
+const float kD_speed = 0.0004 / 0.0035;
 
-PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed);
+PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed, Serial);
 
 float speedSetpoint = 0.0;
 
@@ -98,7 +98,7 @@ float kP_angle = 70.0;
 const float kI_angle = 0.4;
 const float kD_angle = 0.5;
 
-PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, true, true);
+PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, Serial, true, true);
 
 // to keep constant sample time
 const int dt = 1; // sample time = 0.001 seconds
@@ -164,7 +164,7 @@ void loop() {
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
 
-  //  Serial.println(pitch);
+  Serial.println(pitch);
 
   if (timeChange >= dt) {
     // use pitch and PID controller to calculate motor motorCommand
@@ -181,7 +181,6 @@ void loop() {
  ====================================== */
 void speedToAnglePID() {
   angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
-  Serial.println(angleSetpoint);
 }
 
 float getAverageFilteredSpeed() {
