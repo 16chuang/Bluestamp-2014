@@ -8,6 +8,7 @@
 #include <FIMU_ADXL345.h>
 #include <FIMU_ITG3200.h>
 #include <FreeSixIMU.h>
+#include <PIDController_Claire.h>
 
 // direction
 #define FORWARD 0
@@ -76,23 +77,28 @@ const int THRESHOLD_DT = 50; // number of milliseconds of not moving for speed t
 const float MILLIS_TO_SEC = 1000;
 
 // digital low pass filter stuff (digitalSmooth function)
-float smoothedRightSpeed = 0;
+float smoothedRightSpeed, smoothedLeftSpeed = 0;
 
 /* -----------------------------
  * ---- SPEED TO ANGLE PID -----
  * ----------------------------- */
-const float kP_speed = 0;
+const float kP_speed = 0.01;
+const float kI_speed = 0;
+const float kD_speed = 0;
 
-const float SPEED_SETPOINT = 0.0;
+PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed);
+
+float speedSetpoint = 0.0;
 
 /* -----------------------------
  * ---- ANGLE TO MOTOR PID -----
  * ----------------------------- */
 // gains
-const float kP_MAX_ANGLE = 70.0;
-float kP_angle = kP_MAX_ANGLE;
+float kP_angle = 70.0;
 const float kI_angle = 0.4;
 const float kD_angle = 0.5;
+
+PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, true, true);
 
 // to keep constant sample time
 const int dt = 1; // sample time = 0.001 seconds
@@ -102,13 +108,6 @@ unsigned long timeChange = 0;
 
 float angleSetpoint = 0.0;
 float motorCommand;
-
-float currentAngleError = 0.0;
-float prevAngleError = 0.0;
-
-// for use in integral term calculation
-float angleErrorSum = 0.0;
-QueueList <float> angleErrorQueue;
 
 /* -----------------------------
  * --- COMPLEMENTARY FILTER ----
@@ -181,8 +180,14 @@ void loop() {
  === SPEED TO ANGLE PID + GET SPEED ===
  ====================================== */
 void speedToAnglePID() {
+  angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
+  Serial.println(angleSetpoint);
+}
+
+float getAverageFilteredSpeed() {
   smoothedRightSpeed = smooth(getRawRightSpeed(), 0.95, smoothedRightSpeed);
-  Serial.println(smoothedRightSpeed);
+  smoothedLeftSpeed = smooth(getRawLeftSpeed(), 0.95, smoothedLeftSpeed);
+  return (smoothedRightSpeed + smoothedLeftSpeed) / 2;
 }
 
 float getRawLeftSpeed() {
@@ -205,9 +210,8 @@ float getRawRightSpeed() {
  == ANGLE TO MOTOR PID + MOVE MOTORS ==
  ====================================== */
 void angleToMotorPID() {
-  // calculate motorCommand
-  currentAngleError = pitch - angleSetpoint;
-  motorCommand = pTerm() + iTerm() + dTerm();
+  //  // calculate motorCommand
+  motorCommand = angleToMotorPIDController.compute(pitch, angleSetpoint);
 
   // send motorCommand to motors
   int direction = (motorCommand >= 0) ? FORWARD : BACKWARD;
@@ -215,37 +219,6 @@ void angleToMotorPID() {
 
   moveMotor(R_MOTOR, direction, speed);
   moveMotor(L_MOTOR, direction, speed);
-}
-
-float pTerm() {
-  // gain scheduling
-  //  float scale = abs(pitch)/DEADBAND_PITCH;
-  //  kP_angle = min(scale * kP_MAX_ANGLE, kP_MAX_ANGLE);
-
-  kP_angle = min(abs(((55 * pow(pitch, 2)) + (20 * pitch) + 10)), kP_MAX_ANGLE);
-
-  return (kP_angle * currentAngleError);
-}
-
-float iTerm() {
-  // calculate sum of last 100 errors
-  angleErrorQueue.push(currentAngleError); // always add current error to stack
-  angleErrorSum += currentAngleError;
-
-  if (angleErrorQueue.count() > 100) { // keeps most recent 100 values
-    angleErrorSum -= angleErrorQueue.pop();
-  }
-
-  float iTerm = kI_angle * angleErrorSum;
-  //  iTerm = constrain(iTerm, -90, 90) // integral limit to between -90 and 90
-  return iTerm;
-}
-
-float dTerm() {
-  float dTerm = kD_angle * (currentAngleError - prevAngleError);
-  //  float dTerm = kD_angle * getGyroYRate();
-  prevAngleError = currentAngleError;
-  return dTerm;
 }
 
 void moveMotor(int motor, int direction, int speed) {
@@ -308,21 +281,21 @@ void rightEncoder() {
 /*
   from http://playground.arduino.cc/Main/Smooth
   written by Paul Badger
-  
+
   int sensVal - the sensor variable - raw material to be smoothed
 
   float  filterVal - The filter value is a float and must be between 0 and .9999 say. 0 is off (no smoothing) and .9999 is maximum smoothing.
-    The actual performance of the filter is going to be dependent on fast you are sampling your sensor (the total loop time), so 
+    The actual performance of the filter is going to be dependent on fast you are sampling your sensor (the total loop time), so
     some trial and error will probably be neccessary to get the desired response.
 
   smoothedVal - Use this for the output of the sensor and also feed it back into the loop. Each sensor needs its own value.
     Don't use this variable for any other purpose.
 */
-int smooth(float data, float filterVal, float smoothedVal){
-  if (filterVal > 1){      // check to make sure param's are within range
+int smooth(float data, float filterVal, float smoothedVal) {
+  if (filterVal > 1) {     // check to make sure param's are within range
     filterVal = .99;
   }
-  else if (filterVal <= 0){
+  else if (filterVal <= 0) {
     filterVal = 0;
   }
 
