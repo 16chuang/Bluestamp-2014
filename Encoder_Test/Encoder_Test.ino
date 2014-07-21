@@ -1,10 +1,10 @@
-#define ENC_FORWARD 1;
-#define ENC_BACKWARD -1;
+#define ENC_FORWARD -1;
+#define ENC_BACKWARD 1;
 
-const int L_ENCODER_A = 2;
-const int L_ENCODER_B = 7;
-const int R_ENCODER_A = 3;
-const int R_ENCODER_B = 8;
+const int L_ENCODER_A = 24;
+const int L_ENCODER_B = 25;
+const int R_ENCODER_A = 52;
+const int R_ENCODER_B = 53;
 
 volatile long encoderRCount = 0;
 volatile long encoderLCount = 0;
@@ -22,6 +22,11 @@ const float MILLIS_TO_SEC = 1000;
 // digital low pass filter (smooth function)
 float smoothedRightSpeed = 0;
 
+// MOTORS
+//const int R_MOTOR_PWM = 6;
+//const int R_MOTOR_IN_A = 4;
+//const int R_MOTOR_IN_B = 5;
+
 void setup() {
   Serial.begin(9600);
   pinMode(L_ENCODER_A, INPUT);
@@ -29,21 +34,17 @@ void setup() {
   pinMode(R_ENCODER_A, INPUT);
   pinMode(R_ENCODER_B, INPUT);
 
-  attachInterrupt(0, leftEncoder, RISING); // pin 2, low to high
-  attachInterrupt(1, rightEncoder, RISING); // pin 3, low to high
+  attachInterrupt(L_ENCODER_A, leftEncoder, RISING);
+  attachInterrupt(R_ENCODER_A, rightEncoder, RISING);
+  
+//  digitalWrite(R_MOTOR_IN_A, 1);
+//  digitalWrite(R_MOTOR_IN_B, 0);
 }
 
 void loop() {
-  smoothedRightSpeed = smooth(getRawRightSpeed(), 0.9, smoothedRightSpeed);
-  Serial.println(smoothedRightSpeed);
-}
-
-float getRawLeftSpeed() {
-  if ((millis() - leftEnc_t2) < THRESHOLD_DT) {
-    return leftEncDirection * (MILLIS_TO_SEC / leftEnc_dt);
-  } else {
-    return 0;
-  }
+//    analogWrite(R_MOTOR_PWM, 50);
+//    smoothedRightSpeed = smooth(getRawRightSpeed(), 0.95, smoothedRightSpeed);
+    Serial.print(getRawLeftSpeed()); Serial.print('\t'); Serial.println(getRawRightSpeed());
 }
 
 float getRawRightSpeed() {
@@ -54,22 +55,11 @@ float getRawRightSpeed() {
   }
 }
 
-void leftEncoder() {
-  // determine direction
-  if (digitalRead(L_ENCODER_B) == LOW) {
-    leftEncDirection = ENC_FORWARD;
+float getRawLeftSpeed() {
+  if ((millis() - leftEnc_t2) < THRESHOLD_DT) {
+    return leftEncDirection * (MILLIS_TO_SEC / leftEnc_dt);
   } else {
-    leftEncDirection = ENC_BACKWARD;
-  }
-  
-  // record dt time difference in milliseconds
-  if (leftEncTimeState) {
-    leftEnc_t1 = millis();
-    leftEncTimeState = false;
-  } else {
-    leftEnc_t2 = millis();
-    leftEnc_dt = leftEnc_t2 - leftEnc_t1;
-    leftEncTimeState = true;
+    return 0;
   }
 }
 
@@ -89,6 +79,26 @@ void rightEncoder() {
     rightEnc_t2 = millis();
     rightEnc_dt = rightEnc_t1 - rightEnc_t2;
     rightEncTimeState = true;
+  }
+}
+
+void leftEncoder() {
+//  Serial.println("in the interrupt");
+  // determine direction
+  if (digitalRead(L_ENCODER_B) == LOW) {
+    leftEncDirection = ENC_FORWARD;
+  } else {
+    leftEncDirection = ENC_BACKWARD;
+  }
+
+  // record dt time difference in milliseconds
+  if (leftEncTimeState) {
+    leftEnc_t1 = millis();
+    leftEncTimeState = false;
+  } else {
+    leftEnc_t2 = millis();
+    leftEnc_dt = leftEnc_t2 - leftEnc_t1;
+    leftEncTimeState = true;
   }
 }
 
