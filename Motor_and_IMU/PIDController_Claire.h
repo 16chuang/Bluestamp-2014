@@ -11,8 +11,9 @@ class PIDController_Claire
 		// default: custom P and I = false
 		
 		float compute(float currentReading, float setpoint);
+		float feedforwardCompute(float currentReading, float setpoint, float kFF);
 
-		float getIntegralSum();
+		float getErrorSum();
 
 	private:
 		float pTerm(float currentReading);
@@ -23,6 +24,7 @@ class PIDController_Claire
 		bool _integralQueue, _pGainScheduling;
 		float _error, _errorSum, _prevError;
 		QueueList <float> _errorQueue;
+		float _feedforward, _feedback;
 
 		static const float kP_MAX = 70.0;
 		static const int MAX_QUEUE_SIZE = 100;

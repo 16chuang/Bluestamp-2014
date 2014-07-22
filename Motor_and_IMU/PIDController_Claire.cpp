@@ -27,11 +27,21 @@ float PIDController_Claire::compute(float currentReading, float setpoint)
 	return (pTerm(currentReading) + iTerm() + dTerm());
 }
 
+float PIDController_Claire::feedforwardCompute(float currentReading, float setpoint, float kFF) {
+	_feedback = compute(currentReading, setpoint);
+	_feedforward = kFF * setpoint;
+	return (_feedback + _feedforward);
+}
+
 float PIDController_Claire::pTerm(float currentReading) 
 {
 	if (_pGainScheduling) {
 		// special function for pitch to PWM
-		_kP = min(abs(((55 * pow(currentReading, 2)) + (20 * currentReading) + 10)), kP_MAX);
+//		_kP = min(abs(((55 * pow(currentReading, 2)) + (20 * currentReading) + 10)), kP_MAX);
+
+//                float scale = abs(currentReading)/2;
+//                _kP = min(scale * kP_MAX, kP_MAX);
+                _kP = (abs(_error) > 10) ? kP_MAX : 0;
 	}
 
 	return (_kP * _error);
@@ -61,4 +71,8 @@ float PIDController_Claire::dTerm()
 	float dTerm = _kD * (_error - _prevError);
 	_prevError = _error;
 	return dTerm;
+}
+
+float PIDController_Claire::getErrorSum() {
+  return _errorSum;
 }

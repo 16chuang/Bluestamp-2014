@@ -8,27 +8,26 @@
 #include <FIMU_ADXL345.h>
 #include <FIMU_ITG3200.h>
 #include <FreeSixIMU.h>
-#include <PIDController_Claire.h>
-
-// direction
-#define FORWARD 0
-#define BACKWARD 1
+#include "PIDController_Claire.h"
+#include "Motor_Claire.h"
 
 // motor
 #define R_MOTOR 0
 #define L_MOTOR 1
 
 // encoder speed direction
-#define ENC_FORWARD 1;
-#define ENC_BACKWARD -1;
+#define ENC_FORWARD -1;
+#define ENC_BACKWARD 1;
 
 /* -----------------------------
  * ----------- IMU -------------
  * ----------------------------- */
 FreeSixIMU IMU = FreeSixIMU();
 
-float rawIMUValues[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // array passed to IMU object to be filled up with raw values
-float zeroIMUAngle = 92.6; // 90 + offset from observations
+// arrays passed to IMU object to be filled up with raw values
+int16_t rawAcc[3] = {0, 0, 0};
+float rawGyro[3] = {0.0, 0.0, 0.0}; 
+float zeroIMUAngle = 92.6;
 
 // sensor scale factors
 const float GYRO_SCALE = 1; // already taken care of in FreeSixIMU library
@@ -42,26 +41,29 @@ double pitch = 0; // stores filtered pitch of robot
  * ---------- MOTOR ------------
  * ----------------------------- */
 // motor PWM
-const int L_MOTOR_PWM = 6;
-const int R_MOTOR_PWM = 9;
+const int L_MOTOR_PWM = 5;
+const int R_MOTOR_PWM = 3;
 
 // change direction of motors
-const int L_MOTOR_IN_A = 4;
-const int L_MOTOR_IN_B = 5;
-const int R_MOTOR_IN_A = 11;
-const int R_MOTOR_IN_B = 10;
+const int L_MOTOR_IN_A = 7;
+const int L_MOTOR_IN_B = 6;
+const int R_MOTOR_IN_A = 2;
+const int R_MOTOR_IN_B = 4;
 
 // deadband pitch
 const float DEADBAND_PITCH = 1.25;
+
+Motor_Claire motor_R(R_MOTOR_PWM, R_MOTOR_IN_A, R_MOTOR_IN_B);
+Motor_Claire motor_L(L_MOTOR_PWM, L_MOTOR_IN_A, L_MOTOR_IN_B);
 
 /* -----------------------------
  * --------- ENCODERS ----------
  * ----------------------------- */
 // encoder Arduino ports
-const int L_ENCODER_A = 2;
-const int L_ENCODER_B = 7;
-const int R_ENCODER_A = 3;
-const int R_ENCODER_B = 8;
+const int L_ENCODER_A = 24;
+const int L_ENCODER_B = 25;
+const int R_ENCODER_A = 52;
+const int R_ENCODER_B = 53;
 
 // dt calculation
 bool leftEncTimeState, rightEncTimeState = true;
@@ -82,38 +84,55 @@ float smoothedRightSpeed, smoothedLeftSpeed = 0;
 /* -----------------------------
  * ---- SPEED TO ANGLE PID -----
  * ----------------------------- */
-const float kP_speed = 0.015;
-const float kI_speed = 0.0001;
-const float kD_speed = 0.0004 / 0.0035;
+const float kP_speed = -0.015;
+const float kI_speed = -0.0002;
+const float kD_speed = 0.0001 / 0.0035;
 
 PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed, Serial);
 
-float speedSetpoint = 0.0;
+float speedSetpoint = 150.0;
 
 /* -----------------------------
  * ---- ANGLE TO MOTOR PID -----
  * ----------------------------- */
 // gains
-float kP_angle = 70.0;
-const float kI_angle = 0.4;
-const float kD_angle = 0.5;
+//float kP_angle = 70.0;
+//const float kI_angle = 0.4;
+//const float kD_angle = 0.5;
 
-PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, Serial, true, true);
+float kP_angle = 75.0;
+const float kI_angle = 0.4;
+const float kD_angle = 0.2 / 0.003;
+
+PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, Serial, true, false);
 
 // to keep constant sample time
-const int dt = 1; // sample time = 0.001 seconds
+const int dt = 1; // sample time = 1 millisecond
 unsigned long nowTime = 0;
 unsigned long lastTime = 0;
 unsigned long timeChange = 0;
 
 float angleSetpoint = 0.0;
-float motorCommand;
+float commandedSpeedSetpoint;
+
+/* -----------------------------
+ *  COMMANDED SPEED TO PWM PID -
+ * ----------------------------- */
+const float kP_speedToPWM = -0.06;
+const float kI_speedToPWM = -0.001;
+const float kD_speedToPWM = 0.0;
+const float kFF_speedToPWM = 0.5;
+
+PIDController_Claire speedToPWMPIDController_R(kP_speedToPWM, kI_speedToPWM, kD_speedToPWM, Serial);
+PIDController_Claire speedToPWMPIDController_L(kP_speedToPWM, kI_speedToPWM, kD_speedToPWM, Serial);
+
+float motorPWMCommand_R, motorPWMCommand_L = 0;
 
 /* -----------------------------
  * --- COMPLEMENTARY FILTER ----
  * ----------------------------- */
 unsigned long loopTime = 0;
-const float COMPLEMENTARY_GAIN = 0.985;
+const float COMPLEMENTARY_GAIN = 0.995;
 float lastPitch = 0;
 unsigned long lastStartTime = 0;
 
@@ -124,14 +143,9 @@ void setup() {
   Serial.begin(9600);
 
   // Arduino pins to motor driver
-  pinMode(L_MOTOR_PWM, OUTPUT);
-  pinMode(L_MOTOR_IN_A, OUTPUT);
-  pinMode(L_MOTOR_IN_B, OUTPUT);
-
-  pinMode(R_MOTOR_PWM, OUTPUT);
-  pinMode(R_MOTOR_IN_A, OUTPUT);
-  pinMode(R_MOTOR_IN_B, OUTPUT);
-
+  motor_R.setup();
+  motor_L.setup();
+  
   // Arduino pins to encoder
   pinMode(L_ENCODER_A, INPUT);
   pinMode(L_ENCODER_B, INPUT);
@@ -139,8 +153,8 @@ void setup() {
   pinMode(R_ENCODER_B, INPUT);
 
   // encoder read interrupts
-  attachInterrupt(0, leftEncoder, RISING); // pin 2, low to high
-  attachInterrupt(1, rightEncoder, RISING); // pin 3, low to high
+  attachInterrupt(L_ENCODER_A, leftEncoder, RISING); // pin 2, low to high
+  attachInterrupt(R_ENCODER_A, rightEncoder, RISING); // pin 3, low to high
 
   // IMU initialization
   Wire.begin(); // IMU connection
@@ -163,13 +177,14 @@ void loop() {
   // complementary filter
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
+  
+//  Serial.println(loopTime);
 
-  Serial.println(pitch);
-
+  // PID controllers
   if (timeChange >= dt) {
-    // use pitch and PID controller to calculate motor motorCommand
     speedToAnglePID();
     angleToMotorPID();
+    speedToPWMPID();
     lastTime = nowTime;
   }
 
@@ -181,12 +196,22 @@ void loop() {
  ====================================== */
 void speedToAnglePID() {
   angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
+  Serial.println(getAverageFilteredSpeed());
 }
 
 float getAverageFilteredSpeed() {
+  // WHEN ALL THREE LOOPS ARE IN, ADD GLOBAL VARS BACK IN AND DELETE GET SMOOTHED METHODS
+  return (getSmoothedRightSpeed() + getSmoothedLeftSpeed()) / 2;
+}
+
+float getSmoothedRightSpeed() {
   smoothedRightSpeed = smooth(getRawRightSpeed(), 0.95, smoothedRightSpeed);
+  return smoothedRightSpeed;
+}
+
+float getSmoothedLeftSpeed() {
   smoothedLeftSpeed = smooth(getRawLeftSpeed(), 0.95, smoothedLeftSpeed);
-  return (smoothedRightSpeed + smoothedLeftSpeed) / 2;
+  return smoothedLeftSpeed;
 }
 
 float getRawLeftSpeed() {
@@ -206,31 +231,21 @@ float getRawRightSpeed() {
 }
 
 /* ====================================
- == ANGLE TO MOTOR PID + MOVE MOTORS ==
+ ====== ANGLE TO MOTOR SPEED PID ======
  ====================================== */
 void angleToMotorPID() {
-  //  // calculate motorCommand
-  motorCommand = angleToMotorPIDController.compute(pitch, angleSetpoint);
-
-  // send motorCommand to motors
-  int direction = (motorCommand >= 0) ? FORWARD : BACKWARD;
-  int speed = min(abs(motorCommand), 255);
-
-  moveMotor(R_MOTOR, direction, speed);
-  moveMotor(L_MOTOR, direction, speed);
+  commandedSpeedSetpoint = angleToMotorPIDController.compute(pitch, angleSetpoint);
 }
 
-void moveMotor(int motor, int direction, int speed) {
-  // PWM values: 25% = 64; 50% = 127; 75% = 191; 100% = 255
-  if (motor == R_MOTOR) {
-    analogWrite(R_MOTOR_PWM, speed);
-    digitalWrite(R_MOTOR_IN_A, direction);
-    digitalWrite(R_MOTOR_IN_B, abs(1 - direction));
-  } else if (motor == L_MOTOR) {
-    analogWrite(L_MOTOR_PWM, speed);
-    digitalWrite(L_MOTOR_IN_A, direction);
-    digitalWrite(L_MOTOR_IN_B, abs(1 - direction));
-  }
+/* ====================================
+  MOTOR SPEED TO PWM PID + MOVE MOTORS 
+ ====================================== */
+void speedToPWMPID() {
+  motorPWMCommand_R = speedToPWMPIDController_R.feedforwardCompute(getSmoothedRightSpeed(), commandedSpeedSetpoint, kFF_speedToPWM);
+  motorPWMCommand_L = speedToPWMPIDController_L.feedforwardCompute(getSmoothedLeftSpeed(), commandedSpeedSetpoint, kFF_speedToPWM);
+        
+  motor_R.sendPWMCommand(motorPWMCommand_R);
+  motor_L.sendPWMCommand(motorPWMCommand_L);
 }
 
 /* ====================================
@@ -307,41 +322,22 @@ int smooth(float data, float filterVal, float smoothedVal) {
  ====== GET PROCESSED IMU VALUES ======
  ====================================== */
 void updateIMU() {
-  IMU.getValues(rawIMUValues);
+  IMU.acc.readAccel(&rawAcc[0], &rawAcc[1], &rawAcc[2]);
+  IMU.gyro.readGyro(&rawGyro[0], &rawGyro[1], &rawGyro[2]);
 }
 
-// taken from TKJ Electronics' code
 float getGyroYRate() {
-  return (getRawGyroY() / GYRO_SCALE);
+  return rawGyro[0];
 }
 
 // taken from TKJ Electronics' code
 float getAccY() {
-  float accXval = getRawAccX() / ACC_SCALE;
-  float accYval = getRawAccY() / ACC_SCALE;
+  float accXval = rawAcc[0] / ACC_SCALE;
+  float accYval = rawAcc[1] / ACC_SCALE;
   accYval--; //-1g when lying down
-  float accZval = getRawAccZ() / ACC_SCALE;
+  float accZval = rawAcc[2] / ACC_SCALE;
 
   float R = sqrt(pow(accXval, 2) + pow(accYval, 2) + pow(accZval, 2)); // Calculate the length of force vector
-  float angleY = acos(accYval / R) * RADIAN_TO_DEGREE	;
+  float angleY = acos(accYval / R) * RADIAN_TO_DEGREE;
   return angleY;
-}
-
-/* ====================================
- ========= GET RAW IMU VALUES =========
- ====================================== */
-float getRawGyroY() {
-  return rawIMUValues[3];
-}
-
-float getRawAccX() {
-  return rawIMUValues[0];
-}
-
-float getRawAccY() {
-  return rawIMUValues[1];
-}
-
-float getRawAccZ() {
-  return rawIMUValues[2];
 }
