@@ -10,6 +10,9 @@
 #include <FreeSixIMU.h>
 #include "PIDController_Claire.h"
 #include "Motor_Claire.h"
+#include <PS3BT.h>
+#include <usbhub.h>
+#include <SPI.h>
 
 // motor
 #define R_MOTOR 0
@@ -18,6 +21,12 @@
 // encoder speed direction
 #define ENC_FORWARD -1;
 #define ENC_BACKWARD 1;
+
+// PS3 controller
+// Satisfy IDE, which only needs to see the include statment in the ino.
+#ifdef dobogusinclude
+#include <spi4teensy3.h>
+#endif
 
 /* -----------------------------
  * ----------- IMU -------------
@@ -84,13 +93,13 @@ float smoothedRightSpeed, smoothedLeftSpeed = 0;
 /* -----------------------------
  * ---- SPEED TO ANGLE PID -----
  * ----------------------------- */
-const float kP_speed = -0.015;
-const float kI_speed = -0.0002;
+const float kP_speed = -0.01;
+const float kI_speed = -0.0001;
 const float kD_speed = 0.0001 / 0.0035;
 
 PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed, Serial);
 
-float speedSetpoint = 150.0;
+float speedSetpoint = 0.0;
 
 /* -----------------------------
  * ---- ANGLE TO MOTOR PID -----
@@ -136,11 +145,24 @@ const float COMPLEMENTARY_GAIN = 0.995;
 float lastPitch = 0;
 unsigned long lastStartTime = 0;
 
+/* -----------------------------
+ * ------ PS3 CONTROLLER -------
+ * ----------------------------- */
+USB usb;
+BTD btd(&usb); // bluetooth dongle
+PS3BT PS3(&btd); // PS3 controller bluetooth
+
 /* ====================================
  ================ SETUP ===============
  ====================================== */
 void setup() {
   Serial.begin(9600);
+  
+  if (usb.Init() == -1) {
+    Serial.print(F("\r\nOSC did not start"));
+    while (1); //halt
+  }
+  Serial.print(F("\r\nPS3 Bluetooth Library Started"));
 
   // Arduino pins to motor driver
   motor_R.setup();
@@ -170,7 +192,15 @@ void loop() {
   nowTime = millis();
   loopTime = nowTime - lastStartTime;
   timeChange = nowTime - lastTime;
-
+  
+  usb.Task();
+  
+  if (PS3.PS3Connected || PS3.PS3NavigationConnected) {
+    if (PS3.getButtonClick(START)) {
+      Serial.println("START");
+    }
+  }
+  
   // get raw acc and gyro readings
   updateIMU();
 
@@ -178,7 +208,7 @@ void loop() {
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
   
-//  Serial.println(loopTime);
+  Serial.println(loopTime);
 
   // PID controllers
   if (timeChange >= dt) {
@@ -196,7 +226,6 @@ void loop() {
  ====================================== */
 void speedToAnglePID() {
   angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
-  Serial.println(getAverageFilteredSpeed());
 }
 
 float getAverageFilteredSpeed() {
