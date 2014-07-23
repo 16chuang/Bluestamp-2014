@@ -94,7 +94,7 @@ float smoothedRightSpeed, smoothedLeftSpeed = 0;
  * ---- SPEED TO ANGLE PID -----
  * ----------------------------- */
 const float kP_speed = -0.01;
-const float kI_speed = -0.0001;
+const float kI_speed = -0.00012;
 const float kD_speed = 0.0001 / 0.0035;
 
 PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed, Serial);
@@ -116,10 +116,10 @@ const float kD_angle = 0.2 / 0.003;
 PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, Serial, true, false);
 
 // to keep constant sample time
-const int dt = 1; // sample time = 1 millisecond
+const int OUTER_PID_RATE = 10; // sample time = 1 millisecond
 unsigned long nowTime = 0;
-unsigned long lastTime = 0;
-unsigned long timeChange = 0;
+unsigned long lastOuterPIDTime = 0;
+unsigned long outerPIDTimeChange = 0;
 
 float angleSetpoint = 0.0;
 float commandedSpeedSetpoint;
@@ -191,14 +191,12 @@ void setup() {
 void loop() {
   nowTime = millis();
   loopTime = nowTime - lastStartTime;
-  timeChange = nowTime - lastTime;
+  outerPIDTimeChange = nowTime - lastOuterPIDTime;
   
   usb.Task();
   
   if (PS3.PS3Connected || PS3.PS3NavigationConnected) {
-    if (PS3.getButtonClick(START)) {
-      Serial.println("START");
-    }
+    readJoystick();
   }
   
   // get raw acc and gyro readings
@@ -208,17 +206,31 @@ void loop() {
   pitch = COMPLEMENTARY_GAIN * (lastPitch + getGyroYRate() * loopTime / 1000) + (1 - COMPLEMENTARY_GAIN) * (getAccY() - zeroIMUAngle);
   lastPitch = pitch;
   
-  Serial.println(loopTime);
+//  Serial.println(loopTime);
 
   // PID controllers
-  if (timeChange >= dt) {
+  if (outerPIDTimeChange >= OUTER_PID_RATE) {
     speedToAnglePID();
-    angleToMotorPID();
-    speedToPWMPID();
-    lastTime = nowTime;
+    lastOuterPIDTime = nowTime;
   }
+  
+  angleToMotorPID();
+  speedToPWMPID();
 
   lastStartTime = nowTime;
+}
+
+/* ====================================
+ ============ READ JOYSTICK ===========
+ ====================================== */
+void readJoystick() {
+  if (PS3.getAnalogHat(LeftHatY) > 150) { // backwards
+    speedSetpoint = -40.0;
+  } else if (PS3.getAnalogHat(LeftHatY) < 120) { // forwards
+    speedSetpoint = 40.0;
+  } else { // stay upright
+    speedSetpoint = 0;
+  }
 }
 
 /* ====================================
@@ -226,6 +238,7 @@ void loop() {
  ====================================== */
 void speedToAnglePID() {
   angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
+  Serial.println(angleSetpoint);
 }
 
 float getAverageFilteredSpeed() {
@@ -272,7 +285,7 @@ void angleToMotorPID() {
 void speedToPWMPID() {
   motorPWMCommand_R = speedToPWMPIDController_R.feedforwardCompute(getSmoothedRightSpeed(), commandedSpeedSetpoint, kFF_speedToPWM);
   motorPWMCommand_L = speedToPWMPIDController_L.feedforwardCompute(getSmoothedLeftSpeed(), commandedSpeedSetpoint, kFF_speedToPWM);
-        
+                
   motor_R.sendPWMCommand(motorPWMCommand_R);
   motor_L.sendPWMCommand(motorPWMCommand_L);
 }

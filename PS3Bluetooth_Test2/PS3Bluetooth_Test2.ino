@@ -1,5 +1,6 @@
 #include <PS3BT.h>
 #include <usbhub.h>
+#include <SPI.h>
 
 // Satisfy IDE, which only needs to see the include statment in the ino.
 #ifdef dobogusinclude
