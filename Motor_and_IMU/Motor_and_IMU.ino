@@ -22,8 +22,9 @@
 #define ENC_FORWARD -1;
 #define ENC_BACKWARD 1;
 
-// turning offsets
+// turning
 #define TURN_RIGHT -1
+#define TURN_NONE 0
 #define TURN_LEFT 1
 
 // PS3 controller
@@ -40,7 +41,7 @@ FreeSixIMU IMU = FreeSixIMU();
 // arrays passed to IMU object to be filled up with raw values
 int16_t rawAcc[3] = {0, 0, 0};
 float rawGyro[3] = {0.0, 0.0, 0.0}; 
-float zeroIMUAngle = 92.6;
+float zeroIMUAngle = 92.8;
 
 // sensor scale factors
 const float GYRO_SCALE = 1; // already taken care of in FreeSixIMU library
@@ -97,19 +98,15 @@ float smoothedRightSpeed, smoothedLeftSpeed = 0;
 /* -----------------------------
  * ---- SPEED TO ANGLE PID -----
  * ----------------------------- */
-const float kP_speed = -0.007;
-const float kI_speed = -0.00005;
-const float kD_speed = 0.0001 / 0.0035;
+const float kP_speed = -0.008;
+const float kI_speed = -0.0001;
+const float kD_speed = 0.00005 / 0.0035;
 
 PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed, Serial);
 
 float speedSetpoint = 0.0;
 
-// make outer PID update slower than inside loops
-const int OUTER_PID_RATE = 15; // sample time = 1 millisecond
 unsigned long nowTime = 0;
-unsigned long lastOuterPIDTime = 0;
-unsigned long outerPIDTimeChange = 0;
 
 /* -----------------------------
  * ---- ANGLE TO MOTOR PID -----
@@ -119,9 +116,9 @@ unsigned long outerPIDTimeChange = 0;
 //const float kI_angle = 0.4;
 //const float kD_angle = 0.5;
 
-float kP_angle = 75.0;
-const float kI_angle = 0.4;
-const float kD_angle = 0.2 / 0.003;
+float kP_angle = 85.0;
+const float kI_angle = 0.7;
+const float kD_angle = 0.2 / 0.0035;
 
 PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, Serial, true, false);
 
@@ -157,6 +154,7 @@ BTD btd(&usb); // bluetooth dongle
 PS3BT PS3(&btd); // PS3 controller bluetooth
 const int JOYSTICK_DEADBAND = 28;
 
+int turningDirection = TURN_NONE;
 float turningOffset = 0.0;
 
 /* ====================================
@@ -198,7 +196,6 @@ void setup() {
 void loop() {
   nowTime = millis();
   loopTime = nowTime - lastStartTime;
-  outerPIDTimeChange = nowTime - lastOuterPIDTime;
   
   usb.Task();
   
@@ -214,11 +211,7 @@ void loop() {
   lastPitch = pitch;
 
   // PID controllers
-  if (outerPIDTimeChange >= OUTER_PID_RATE) {
-    speedToAnglePID();
-    lastOuterPIDTime = nowTime;
-  }
-  
+  speedToAnglePID();
   angleToMotorPID();
   speedToPWMPID();
 
@@ -231,11 +224,14 @@ void loop() {
 void readJoystick() {
   // left/right
   if (PS3.getAnalogHat(RightHatX) > 150) { // right
-    turningOffset = TURN_RIGHT * 40.0;
+    turningOffset = 5.0;
+    turningDirection = TURN_RIGHT;
   } else if (PS3.getAnalogHat(RightHatX) < 120) { // left
-    turningOffset = TURN_LEFT * 40.0;
+    turningOffset = 5.0;
+    turningDirection = TURN_LEFT;
   } else { // stay still
     turningOffset = 0.0;
+    turningDirection = TURN_NONE;
   }
   
   // forward/backward
@@ -265,7 +261,7 @@ float scale(int input, float inputMin, int inputMax, int outputMin, float output
  ====================================== */
 void speedToAnglePID() {
   angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
-  Serial.println(getAverageFilteredSpeed());
+//  Serial.println(getAverageFilteredSpeed());
 }
 
 float getAverageFilteredSpeed() {
@@ -304,6 +300,7 @@ float getRawRightSpeed() {
  ====================================== */
 void angleToMotorPID() {
   commandedSpeedSetpoint = angleToMotorPIDController.compute(pitch, angleSetpoint);
+  Serial.println(angleToMotorPIDController.getDerivative());
 }
 
 /* ====================================
@@ -313,8 +310,21 @@ void speedToPWMPID() {
   motorPWMCommand_R = speedToPWMPIDController_R.feedforwardCompute(getSmoothedRightSpeed(), commandedSpeedSetpoint, kFF_speedToPWM);
   motorPWMCommand_L = speedToPWMPIDController_L.feedforwardCompute(getSmoothedLeftSpeed(), commandedSpeedSetpoint, kFF_speedToPWM);
                 
-  motor_R.sendPWMCommand(motorPWMCommand_R + turningOffset);
-  motor_L.sendPWMCommand(motorPWMCommand_L - turningOffset);
+  switch(turningDirection) {
+    case TURN_RIGHT:
+      motor_R.sendPWMCommand(-1 * (motorPWMCommand_R + turningOffset));
+      motor_L.sendPWMCommand(motorPWMCommand_L + turningOffset);
+      break;
+    case TURN_LEFT:
+      motor_R.sendPWMCommand(motorPWMCommand_R + turningOffset);
+      motor_L.sendPWMCommand(-1 * (motorPWMCommand_L + turningOffset));
+      break;
+    case TURN_NONE:
+      motor_R.sendPWMCommand(motorPWMCommand_R);
+      motor_L.sendPWMCommand(motorPWMCommand_L);
+      break;
+  }
+  
 }
 
 /* ====================================

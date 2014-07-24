@@ -68,11 +68,15 @@ float PIDController_Claire::iTerm()
 
 float PIDController_Claire::dTerm() 
 {
-	float dTerm = _kD * (_error - _prevError);
+	_dTerm = _kD * (_error - _prevError);
 	_prevError = _error;
-	return dTerm;
+	return _dTerm;
 }
 
 float PIDController_Claire::getErrorSum() {
   return _errorSum;
+}
+
+float PIDController_Claire::getDerivative() {
+  return _dTerm;
 }
