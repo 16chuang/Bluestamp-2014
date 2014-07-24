@@ -102,7 +102,7 @@ const float kP_speed = -0.008;
 const float kI_speed = -0.0001;
 const float kD_speed = 0.00005 / 0.0035;
 
-PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed, Serial);
+PIDController_Claire speedToAnglePIDController(kP_speed, kI_speed, kD_speed);
 
 float speedSetpoint = 0.0;
 
@@ -120,7 +120,7 @@ float kP_angle = 85.0;
 const float kI_angle = 0.7;
 const float kD_angle = 0.2 / 0.0035;
 
-PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, Serial, true, false);
+PIDController_Claire angleToMotorPIDController(kP_angle, kI_angle, kD_angle, true, false, true);
 
 float angleSetpoint = 0.0;
 float commandedSpeedSetpoint;
@@ -133,8 +133,8 @@ const float kI_speedToPWM = -0.001;
 const float kD_speedToPWM = 0.0;
 const float kFF_speedToPWM = 0.5;
 
-PIDController_Claire speedToPWMPIDController_R(kP_speedToPWM, kI_speedToPWM, kD_speedToPWM, Serial);
-PIDController_Claire speedToPWMPIDController_L(kP_speedToPWM, kI_speedToPWM, kD_speedToPWM, Serial);
+PIDController_Claire speedToPWMPIDController_R(kP_speedToPWM, kI_speedToPWM, kD_speedToPWM);
+PIDController_Claire speedToPWMPIDController_L(kP_speedToPWM, kI_speedToPWM, kD_speedToPWM);
 
 float motorPWMCommand_R, motorPWMCommand_L = 0;
 
@@ -261,7 +261,7 @@ float scale(int input, float inputMin, int inputMax, int outputMin, float output
  ====================================== */
 void speedToAnglePID() {
   angleSetpoint = speedToAnglePIDController.compute(getAverageFilteredSpeed(), speedSetpoint);
-//  Serial.println(getAverageFilteredSpeed());
+  Serial.println(getAverageFilteredSpeed());
 }
 
 float getAverageFilteredSpeed() {
@@ -300,7 +300,7 @@ float getRawRightSpeed() {
  ====================================== */
 void angleToMotorPID() {
   commandedSpeedSetpoint = angleToMotorPIDController.compute(pitch, angleSetpoint);
-  Serial.println(angleToMotorPIDController.getDerivative());
+//  Serial.println(angleToMotorPIDController.getDerivative());
 }
 
 /* ====================================
